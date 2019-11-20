@@ -42,7 +42,8 @@ class GlobusAuthentication(MultiproviderBaseAuthentication):
 
         resp = requests.post(
                 GlobusAuthentication.INTROSPECTION_URL,
-                data={"token": bearer_token},
+                data={"token": bearer_token,
+                      "include": "identities_set,session_info,aud"},
                 auth=(settings.GLOBUS_CLIENT_ID, settings.GLOBUS_CLIENT_SECRET)
         )
 
@@ -53,7 +54,35 @@ class GlobusAuthentication(MultiproviderBaseAuthentication):
 
         logger.debug("Introspection response: {}".format(content))
 
-        username = content.get("username")
+        identitiesset = content.get("identities_set")
+        logger.debug(identitiesset)
+        idstring = ",".join(identitiesset )
+
+        #bearer token is a bytes, but we need a str for the auth header
+        asciibearer_token = bearer_token.decode('UTF-8')
+        ids = requests.get(
+                "https://auth.globus.org/v2/api/identities",
+                params = {"ids": idstring},
+                headers = {"Authorization": f'Bearer {asciibearer_token}'}
+        )
+
+        if not ids.ok:
+            msg = f'Identities call failed with status {ids.status_code} bearer_token {bearer_token} idstring {idstring}'
+            raise exceptions.AuthenticationFailed(msg)
+        try:
+            id_set = ids.json()
+        except Exception as e:
+            logger.warning("Error when inspecting identities: {}".format(e))
+        iddata = id_set.get("identities")
+        if not iddata:
+            msg = f'Invalid introspection response {ids.status_code} bearer_token {bearer_token} idstring {idstring}'
+            raise exceptions.AuthenticationFailed(msg)
+        for id in iddata:
+            if id['identity_provider']=="36007761-2cf2-4e74-a068-7473afc1d054":
+               required_id = id
+               username = required_id['username']
+
+        #username = content.get("username")
         active = content.get("active")
         sub = content.get("sub")
         aud = content.get("aud")
@@ -100,12 +129,11 @@ class GlobusAuthentication(MultiproviderBaseAuthentication):
             user = user_association.user
         except UserAssociation.DoesNotExist:
             fullname, firstname, lastname = self.get_user_names(name)
-            # user could exist, either manually created or from a race condition
-            user, created = UserModel.objects.update_or_create(
+            user,created = UserModel.objects.update_or_create(
                     username=username,
-                    defaults={'first_name': firstname,
-                              'last_name': lastname,
-                              'email': email},
+                    defaults={'first_name':firstname,
+                              'last_name':lastname,
+                              'email':email},
             )
             logger.debug("New user '{}' created".format(user.username))
             user_association = UserAssociation.objects.create(
