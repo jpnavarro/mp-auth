@@ -54,6 +54,12 @@ class GlobusAuthentication(MultiproviderBaseAuthentication):
 
         logger.debug("Introspection response: {}".format(content))
 
+        active = content.get("active")
+        # Check if the token is active
+        if not active:
+            msg = "Token not active"
+            raise exceptions.AuthenticationFailed(msg)
+
         identitiesset = content.get("identities_set")
         logger.debug(identitiesset)
         idstring = ",".join(identitiesset )
@@ -83,7 +89,6 @@ class GlobusAuthentication(MultiproviderBaseAuthentication):
                username = required_id['username']
 
         #username = content.get("username")
-        active = content.get("active")
         sub = content.get("sub")
         aud = content.get("aud")
         email = content.get("email")
@@ -91,11 +96,6 @@ class GlobusAuthentication(MultiproviderBaseAuthentication):
         exp = content.get("exp")
         nbf = content.get("nbf")
         name = content.get("name")
-
-        # Check if the token is active
-        if not active:
-            msg = "Token not active"
-            raise exceptions.AuthenticationFailed(msg)
 
         unix_time = int(time.time())
         # Check if the 'exp' (Expiration Time) claim applies
